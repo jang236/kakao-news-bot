@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 # ===== Gemini API 설정 =====
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
+model = genai.GenerativeModel("gemini-3-flash-preview")
 
 SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전문가입니다.
 
