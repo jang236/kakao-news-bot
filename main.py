@@ -16,7 +16,7 @@ SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전�
 [규칙]
 - 모든 분야의 뉴스(정치, 사회, 기술, 국제 등)를 받되, 경제/투자에 미치는 영향 중심으로 분석
 - 입력된 뉴스를 내부적으로 3회 압축: 투자 관련 필터링 → 인과관계 구조화 → 핵심 판단 요소 추출. 이 과정은 출력하지 않음
-- 전문 용어는 괄호 안에 쉬운 설명 (예: 기준금리(한국은행이 정하는 이자율 기준))
+- 요약에서는 전문 용어를 괄호 설명 없이 그대로 사용. 용어 설명은 📖 용어 섹션에서 따로 제공
 - 친근한 말투 (~거든요, ~란 말이에요, ~거예요)
 - 확정적 표현 금지, 가능성으로 표현
 - 마크다운(**, *, -, 번호 목록 등) 절대 사용 금지. 일반 텍스트만 사용
@@ -25,10 +25,13 @@ SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전�
 
 [출력 형식 — 반드시 지킬 것]
 
-📰 (기사 원문 제목을 그대로 복사. 절대 수정하거나 요약하지 말 것)
+📰 (제공된 기사 제목을 그대로 사용. 절대 수정하거나 요약하지 말 것)
 
 ✅ 요약 (🟢긍정 / 🔴부정 / 🟡중립):
-핵심 내용 3~4문장. 누가 무엇을 왜 했는지, 경제/시장에 어떤 영향인지.
+핵심 내용 3~4문장. 문장마다 줄바꿈하여 가독성 확보.
+괄호 설명 넣지 말 것. 누가 무엇을 왜 했는지, 경제/시장에 어떤 영향인지.
+
+📖 용어: 어려운 전문 용어 = 쉬운 설명 (최대 2~3개만, 쉬운 뉴스는 생략 가능)
 
 🤖 AI 한줄평: 뉴스의 핵심을 비유나 쉬운 표현으로 한 줄 정리. 누구나 "아, 그런 거구나" 하고 바로 이해할 수 있게.
 
@@ -47,8 +50,8 @@ class Message(BaseModel):
     text: str
 
 
-def extract_article_text(url: str) -> str:
-    """URL에서 기사 본문 텍스트를 추출합니다."""
+def extract_article(url: str) -> dict:
+    """URL에서 기사 제목과 본문 텍스트를 추출합니다."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                        "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -57,6 +60,20 @@ def extract_article_text(url: str) -> str:
     resp = requests.get(url, headers=headers, timeout=10)
     resp.encoding = resp.apparent_encoding
     soup = BeautifulSoup(resp.text, "html.parser")
+
+    # 기사 제목 추출
+    title = ""
+    title_el = soup.select_one("#title_area, .media_end_head_headline, "
+                                "#articleTitle, h1.headline, .article_tit, "
+                                "h1#articleTitle, .tit_view")
+    if title_el:
+        title = title_el.get_text(strip=True)
+    if not title:
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            title = og_title["content"]
+    if not title and soup.title:
+        title = soup.title.get_text(strip=True)
 
     # 불필요한 태그 제거
     for tag in soup(["script", "style", "nav", "header", "footer", "aside", "iframe"]):
@@ -72,7 +89,9 @@ def extract_article_text(url: str) -> str:
 
     # 빈 줄 정리 및 길이 제한
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-    return "\n".join(lines)[:4000]
+    body = "\n".join(lines)[:4000]
+
+    return {"title": title, "body": body}
 
 
 def is_url(text: str) -> bool:
@@ -83,11 +102,11 @@ def is_url(text: str) -> bool:
 def analyze_news(url: str) -> str:
     """뉴스 URL을 크롤링하고 Gemini로 분석합니다."""
     try:
-        article_text = extract_article_text(url)
-        if len(article_text) < 50:
+        article = extract_article(url)
+        if len(article["body"]) < 50:
             return "⚠️ 기사 본문을 가져올 수 없습니다. URL을 확인해주세요."
 
-        prompt = f"{SYSTEM_PROMPT}\n\n---\n기사 본문:\n{article_text}"
+        prompt = f"{SYSTEM_PROMPT}\n\n---\n기사 제목: {article['title']}\n\n기사 본문:\n{article['body']}"
         response = model.generate_content(prompt)
         return response.text
 
