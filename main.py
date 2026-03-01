@@ -136,26 +136,28 @@ def extract_youtube(url: str) -> dict:
     except Exception:
         pass
 
-    # 자막 추출 — 1차: youtube-transcript-api
+    # 자막 추출 — 1차: youtube-transcript-api (v1.x API)
     transcript_text = ""
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = None
-        try:
-            transcript = transcript_list.find_transcript(['ko'])
-        except Exception:
-            try:
-                transcript = transcript_list.find_transcript(['en'])
-            except Exception:
-                for t in transcript_list:
-                    transcript = t
-                    break
-
-        if transcript:
-            entries = transcript.fetch()
-            transcript_text = " ".join([e.text for e in entries])[:4000]
+        ytt_api = YouTubeTranscriptApi()
+        # 한국어 우선, 영어 폴백
+        fetched = ytt_api.fetch(video_id, languages=['ko', 'en'])
+        transcript_text = " ".join([snippet.text for snippet in fetched])[:4000]
     except Exception:
         pass
+
+    # 1차 실패 시 — list로 사용 가능한 자막 탐색
+    if not transcript_text:
+        try:
+            ytt_api = YouTubeTranscriptApi()
+            transcript_list = ytt_api.list(video_id)
+            # 아무 자막이나 가져오기
+            for transcript in transcript_list:
+                fetched = transcript.fetch()
+                transcript_text = " ".join([snippet.text for snippet in fetched])[:4000]
+                break
+        except Exception:
+            pass
 
     # 자막 추출 — 2차: yt-dlp 폴백
     if not transcript_text:
