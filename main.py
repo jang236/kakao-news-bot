@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 from bs4 import BeautifulSoup
+from youtube_transcript_api import YouTubeTranscriptApi
 
 # ===== Gemini API 설정 =====
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -25,7 +26,7 @@ SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전�
 
 [출력 형식 — 반드시 지킬 것]
 
-📰 (제공된 기사 제목을 그대로 사용. 절대 수정하거나 요약하지 말 것)
+📰 (제공된 제목을 그대로 사용. 절대 수정하거나 요약하지 말 것)
 
 ✅ 요약 (🟢긍정 / 🔴부정 / 🟡중립):
 핵심 내용 3~4문장. 문장마다 줄바꿈하여 가독성 확보.
@@ -38,8 +39,8 @@ SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전�
 🏷️ 관련 섹터: (영향 받는 산업/섹터 나열)
 
 [예외 처리]
-- 뉴스가 아닌 내용이 입력된 경우: "뉴스 기사 URL을 넣어주시면 분석해드릴게요!"
-- 내용이 너무 짧은 경우: "기사 내용이 부족해요. 다른 기사를 넣어주시면 분석해드릴 수 있어요!"
+- 뉴스가 아닌 내용이 입력된 경우: "뉴스 또는 유튜브 URL을 넣어주시면 분석해드릴게요!"
+- 내용이 너무 짧은 경우: "내용이 부족해요. 다른 URL을 넣어주시면 분석해드릴 수 있어요!"
 
 반드시 한국어로 답변하세요."""
 
@@ -99,14 +100,82 @@ def is_url(text: str) -> bool:
     return bool(re.match(r"https?://", text.strip()))
 
 
-def analyze_news(url: str) -> str:
-    """뉴스 URL을 크롤링하고 Gemini로 분석합니다."""
-    try:
-        article = extract_article(url)
-        if len(article["body"]) < 50:
-            return "⚠️ 기사 본문을 가져올 수 없습니다. URL을 확인해주세요."
+def is_youtube_url(url: str) -> bool:
+    """유튜브 URL인지 확인합니다."""
+    return bool(re.match(r"https?://(www\.)?(youtube\.com|youtu\.be|m\.youtube\.com)/", url.strip()))
 
-        prompt = f"{SYSTEM_PROMPT}\n\n---\n기사 제목: {article['title']}\n\n기사 본문:\n{article['body']}"
+
+def extract_video_id(url: str) -> str:
+    """유튜브 URL에서 비디오 ID를 추출합니다."""
+    patterns = [
+        r"(?:v=|/v/|youtu\.be/|/embed/|/shorts/)([a-zA-Z0-9_-]{11})",
+        r"([a-zA-Z0-9_-]{11})"
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def extract_youtube(url: str) -> dict:
+    """유튜브 영상에서 제목과 자막을 추출합니다."""
+    video_id = extract_video_id(url)
+    if not video_id:
+        return {"title": "", "body": ""}
+
+    # oEmbed API로 제목 추출
+    title = ""
+    try:
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        resp = requests.get(oembed_url, timeout=5)
+        if resp.status_code == 200:
+            title = resp.json().get("title", "")
+    except Exception:
+        pass
+
+    # 자막 추출
+    transcript_text = ""
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # 한국어 우선, 없으면 다른 언어 + 번역
+        transcript = None
+        try:
+            transcript = transcript_list.find_transcript(['ko'])
+        except Exception:
+            try:
+                transcript = transcript_list.find_transcript(['en'])
+            except Exception:
+                for t in transcript_list:
+                    transcript = t
+                    break
+
+        if transcript:
+            entries = transcript.fetch()
+            transcript_text = " ".join([e.text for e in entries])[:4000]
+    except Exception as e:
+        transcript_text = ""
+
+    return {"title": title, "body": transcript_text}
+
+
+def analyze_content(url: str) -> str:
+    """URL을 분석합니다 (뉴스 또는 유튜브 자동 판별)."""
+    try:
+        # YouTube vs 뉴스 분기
+        if is_youtube_url(url):
+            content = extract_youtube(url)
+            content_type = "유튜브 영상"
+            if not content["body"]:
+                return "⚠️ 자막을 가져올 수 없는 영상이에요. 자막이 있는 영상을 넣어주세요!"
+        else:
+            content = extract_article(url)
+            content_type = "뉴스 기사"
+
+        if len(content["body"]) < 50:
+            return f"⚠️ {content_type} 내용을 가져올 수 없습니다. URL을 확인해주세요."
+
+        prompt = f"{SYSTEM_PROMPT}\n\n---\n제목: {content['title']}\n\n내용:\n{content['body']}"
         response = model.generate_content(prompt)
         return response.text
 
@@ -132,9 +201,9 @@ async def analyze(msg: Message):
         text = text.replace("분석 ", "", 1).strip()
 
     if not is_url(text):
-        return {"response": "⚠️ 올바른 URL을 입력해주세요.\n사용법: 분석 https://뉴스URL"}
+        return {"response": "⚠️ 올바른 URL을 입력해주세요.\n뉴스 또는 유튜브 URL을 넣어주세요!"}
 
-    result = analyze_news(text)
+    result = analyze_content(text)
     return {"response": result}
 
 
