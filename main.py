@@ -1,5 +1,7 @@
 import os
 import re
+import subprocess
+import json as json_module
 import google.generativeai as genai
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -134,11 +136,10 @@ def extract_youtube(url: str) -> dict:
     except Exception:
         pass
 
-    # 자막 추출
+    # 자막 추출 — 1차: youtube-transcript-api
     transcript_text = ""
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        # 한국어 우선, 없으면 다른 언어 + 번역
         transcript = None
         try:
             transcript = transcript_list.find_transcript(['ko'])
@@ -153,8 +154,44 @@ def extract_youtube(url: str) -> dict:
         if transcript:
             entries = transcript.fetch()
             transcript_text = " ".join([e.text for e in entries])[:4000]
-    except Exception as e:
-        transcript_text = ""
+    except Exception:
+        pass
+
+    # 자막 추출 — 2차: yt-dlp 폴백
+    if not transcript_text:
+        try:
+            cmd = [
+                "yt-dlp",
+                "--write-auto-sub",
+                "--sub-lang", "ko,en",
+                "--skip-download",
+                "--sub-format", "json3",
+                "-o", "/tmp/%(id)s",
+                f"https://www.youtube.com/watch?v={video_id}"
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=30)
+
+            # 자막 파일 찾기
+            import glob
+            sub_files = glob.glob(f"/tmp/{video_id}*.json3")
+            if sub_files:
+                with open(sub_files[0], "r", encoding="utf-8") as f:
+                    sub_data = json_module.load(f)
+                events = sub_data.get("events", [])
+                texts = []
+                for event in events:
+                    segs = event.get("segs", [])
+                    for seg in segs:
+                        t = seg.get("utf8", "").strip()
+                        if t and t != "\n":
+                            texts.append(t)
+                transcript_text = " ".join(texts)[:4000]
+
+                # 임시 파일 정리
+                for f in sub_files:
+                    os.remove(f)
+        except Exception:
+            pass
 
     return {"title": title, "body": transcript_text}
 
