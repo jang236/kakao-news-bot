@@ -204,7 +204,7 @@ def extract_youtube(url: str) -> dict:
     return {"title": title, "body": transcript_text}
 
 
-def call_gemini_with_retry(prompt: str, max_retries: int = 2) -> str:
+def call_gemini_with_retry(prompt: str, max_retries: int = 1) -> str:
     """Gemini API를 타임아웃 + 재시도로 호출합니다."""
     for attempt in range(max_retries):
         try:
