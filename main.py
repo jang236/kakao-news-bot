@@ -1,9 +1,12 @@
 import os
 import re
 import subprocess
+import time
 import json as json_module
+import logging
 import google.generativeai as genai
 from fastapi import FastAPI
+from fastapi.responses import Response
 from pydantic import BaseModel
 import requests
 from bs4 import BeautifulSoup
@@ -13,6 +16,9 @@ from youtube_transcript_api import YouTubeTranscriptApi
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-3-flash-preview")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전문가입니다.
 
@@ -198,6 +204,24 @@ def extract_youtube(url: str) -> dict:
     return {"title": title, "body": transcript_text}
 
 
+def call_gemini_with_retry(prompt: str, max_retries: int = 2) -> str:
+    """Gemini API를 타임아웃 + 재시도로 호출합니다."""
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Gemini API 호출 시도 {attempt + 1}/{max_retries}")
+            response = model.generate_content(
+                prompt,
+                request_options={"timeout": 45}
+            )
+            return response.text
+        except Exception as e:
+            logger.warning(f"Gemini API 시도 {attempt + 1} 실패: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+                continue
+            raise e
+
+
 def analyze_content(url: str) -> str:
     """URL을 분석합니다 (뉴스 또는 유튜브 자동 판별)."""
     try:
@@ -215,17 +239,19 @@ def analyze_content(url: str) -> str:
             return f"⚠️ {content_type} 내용을 가져올 수 없습니다. URL을 확인해주세요."
 
         prompt = f"{SYSTEM_PROMPT}\n\n---\n제목: {content['title']}\n\n내용:\n{content['body']}"
-        response = model.generate_content(prompt)
-        return response.text
+        result = call_gemini_with_retry(prompt)
+        return result
 
     except requests.exceptions.Timeout:
-        return "⚠️ 요청 시간이 초과되었습니다. 다시 시도해주세요."
+        return "⚠️ 뉴스 페이지 접속 시간이 초과되었습니다. 다시 시도해주세요."
     except requests.exceptions.RequestException as e:
         return f"⚠️ URL 접속 오류: {str(e)}"
     except Exception as e:
-        return f"⚠️ 분석 오류: {str(e)}"
+        logger.error(f"분석 오류: {str(e)}")
+        return "⚠️ AI 분석에 실패했어요. 잠시 후 다시 시도해주세요."
 
 
+@app.head("/")
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "뉴스 분석 봇 서버 작동 중"}
@@ -242,10 +268,12 @@ async def analyze(msg: Message):
     if not is_url(text):
         return {"response": "⚠️ 올바른 URL을 입력해주세요.\n뉴스 또는 유튜브 URL을 넣어주세요!"}
 
+    logger.info(f"분석 요청: {text}")
     result = analyze_content(text)
     return {"response": result}
 
 
+@app.head("/health")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
