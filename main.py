@@ -60,45 +60,126 @@ class Message(BaseModel):
 
 
 def extract_article(url: str) -> dict:
-    """URL에서 기사 제목과 본문 텍스트를 추출합니다."""
+    """URL에서 기사 제목과 본문 텍스트를 추출합니다. (범용 — 어떤 사이트든 대응)"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                        "AppleWebKit/537.36 (KHTML, like Gecko) "
                        "Chrome/120.0.0.0 Safari/537.36"
     }
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.encoding = resp.apparent_encoding
-    soup = BeautifulSoup(resp.text, "html.parser")
 
-    # 기사 제목 추출
     title = ""
-    title_el = soup.select_one("#title_area, .media_end_head_headline, "
-                                "#articleTitle, h1.headline, .article_tit, "
-                                "h1#articleTitle, .tit_view")
-    if title_el:
-        title = title_el.get_text(strip=True)
-    if not title:
-        og_title = soup.find("meta", property="og:title")
-        if og_title and og_title.get("content"):
-            title = og_title["content"]
-    if not title and soup.title:
-        title = soup.title.get_text(strip=True)
+    body = ""
 
-    # 불필요한 태그 제거
-    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "iframe"]):
-        tag.decompose()
+    # --- Layer 1: trafilatura (범용 기사 추출 엔진) ---
+    try:
+        import trafilatura
 
-    # 네이버 뉴스 본문 추출
-    article = soup.select_one("#dic_area, #articleBodyContents, .article_body, "
-                               "article, .news_end, #articeBody, #newsEndContents")
-    if article:
-        text = article.get_text(strip=True, separator="\n")
-    else:
-        text = soup.get_text(strip=True, separator="\n")
+        # trafilatura 자체 다운로드 시도
+        downloaded = trafilatura.fetch_url(url)
+        if downloaded:
+            extracted = trafilatura.extract(downloaded, include_comments=False)
+            if extracted and len(extracted) > 50:
+                body = extracted[:4000]
 
-    # 빈 줄 정리 및 길이 제한
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    body = "\n".join(lines)[:4000]
+            # 제목 추출 (trafilatura metadata)
+            metadata = trafilatura.extract_metadata(downloaded)
+            if metadata and metadata.title:
+                title = metadata.title
+    except Exception as e:
+        logger.warning(f"trafilatura 추출 실패: {e}")
+
+    # --- Layer 2: requests + trafilatura (User-Agent 변경 시도) ---
+    if len(body) < 50:
+        try:
+            import trafilatura
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.encoding = resp.apparent_encoding
+
+            extracted = trafilatura.extract(resp.text, include_comments=False)
+            if extracted and len(extracted) > 50:
+                body = extracted[:4000]
+
+            if not title:
+                metadata = trafilatura.extract_metadata(resp.text)
+                if metadata and metadata.title:
+                    title = metadata.title
+        except Exception as e:
+            logger.warning(f"requests+trafilatura 실패: {e}")
+
+    # --- Layer 3: BeautifulSoup CSS 선택자 (특정 사이트 대응) ---
+    if len(body) < 50:
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.encoding = resp.apparent_encoding
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # 제목 추출
+            if not title:
+                title_el = soup.select_one(
+                    "#title_area, .media_end_head_headline, "
+                    "#articleTitle, h1.headline, .article_tit, "
+                    "h1#articleTitle, .tit_view, "
+                    "h1.article-title, .news_title, "
+                    "h2.headline, .view_tit, .tit_article"
+                )
+                if title_el:
+                    title = title_el.get_text(strip=True)
+                if not title:
+                    og_title = soup.find("meta", property="og:title")
+                    if og_title and og_title.get("content"):
+                        title = og_title["content"]
+                if not title and soup.title:
+                    title = soup.title.get_text(strip=True)
+
+            # 불필요한 태그 제거
+            for tag in soup(["script", "style", "nav", "header", "footer", "aside", "iframe"]):
+                tag.decompose()
+
+            # 본문 선택자 (확장)
+            article = soup.select_one(
+                "#dic_area, #articleBodyContents, .article_body, "
+                "#articeBody, #newsEndContents, .news_end, "
+                "#article-view-content-div, .article-body, "
+                ".article__content, .news_body, .view_cont, "
+                ".cont_view, .article_txt, #viewBody, "
+                "div[itemprop='articleBody'], "
+                "article, main"
+            )
+            if article:
+                text = article.get_text(strip=True, separator="\n")
+                if len(text) > 50:
+                    lines = [line.strip() for line in text.split("\n") if line.strip()]
+                    body = "\n".join(lines)[:4000]
+        except Exception as e:
+            logger.warning(f"BeautifulSoup 추출 실패: {e}")
+
+    # --- Layer 4: og:description 최종 폴백 (JS 렌더링 사이트) ---
+    if len(body) < 50:
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.encoding = resp.apparent_encoding
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            if not title:
+                og_title = soup.find("meta", property="og:title")
+                if og_title and og_title.get("content"):
+                    title = og_title["content"]
+
+            # og:description 또는 meta description
+            og_desc = soup.find("meta", property="og:description")
+            meta_desc = soup.find("meta", attrs={"name": "description"})
+
+            desc = ""
+            if og_desc and og_desc.get("content"):
+                desc = og_desc["content"]
+            elif meta_desc and meta_desc.get("content"):
+                desc = meta_desc["content"]
+
+            if desc:
+                body = desc
+                logger.info(f"og:description 폴백 사용 ({len(desc)}자)")
+        except Exception as e:
+            logger.warning(f"og:description 추출 실패: {e}")
 
     return {"title": title, "body": body}
 
@@ -235,10 +316,15 @@ def analyze_content(url: str) -> str:
             content = extract_article(url)
             content_type = "뉴스 기사"
 
-        if len(content["body"]) < 50:
+        if len(content["body"]) < 10 and not content["title"]:
             return f"⚠️ {content_type} 내용을 가져올 수 없습니다. URL을 확인해주세요."
 
-        prompt = f"{SYSTEM_PROMPT}\n\n---\n제목: {content['title']}\n\n내용:\n{content['body']}"
+        # 본문이 짧으면 제목을 본문에 포함 (og:description 폴백 대응)
+        analysis_body = content["body"]
+        if len(analysis_body) < 50 and content["title"]:
+            analysis_body = f"{content['title']}\n\n{analysis_body}"
+
+        prompt = f"{SYSTEM_PROMPT}\n\n---\n제목: {content['title']}\n\n내용:\n{analysis_body}"
         result = call_gemini_with_retry(prompt)
         return result
 
