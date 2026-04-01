@@ -2,8 +2,10 @@ import os
 import re
 import subprocess
 import time
+import asyncio
 import json as json_module
 import logging
+from concurrent.futures import ThreadPoolExecutor
 import google.generativeai as genai
 from fastapi import FastAPI
 from fastapi.responses import Response
@@ -343,6 +345,10 @@ async def root():
     return {"status": "ok", "message": "뉴스 분석 봇 서버 작동 중"}
 
 
+# 동시 분석 요청 처리용 스레드풀 (최대 5명 동시)
+_analyze_executor = ThreadPoolExecutor(max_workers=5)
+
+
 @app.post("/analyze")
 async def analyze(msg: Message):
     text = msg.text.strip()
@@ -355,7 +361,9 @@ async def analyze(msg: Message):
         return {"response": "⚠️ 올바른 URL을 입력해주세요.\n뉴스 또는 유튜브 URL을 넣어주세요!"}
 
     logger.info(f"분석 요청: {text}")
-    result = analyze_content(text)
+    # 동기 함수를 별도 스레드에서 실행 → 다른 요청 블로킹 방지
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(_analyze_executor, analyze_content, text)
     return {"response": result}
 
 
