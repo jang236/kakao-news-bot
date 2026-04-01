@@ -15,7 +15,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 # ===== Gemini API 설정 =====
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-3-pro-preview")
+model = genai.GenerativeModel("gemini-3-flash-preview")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
