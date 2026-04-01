@@ -345,8 +345,8 @@ async def root():
     return {"status": "ok", "message": "뉴스 분석 봇 서버 작동 중"}
 
 
-# 동시 분석 요청 처리용 스레드풀 (최대 5명 동시)
-_analyze_executor = ThreadPoolExecutor(max_workers=5)
+# 동시 분석 요청 처리용 스레드풀 (최대 10명 동시)
+_analyze_executor = ThreadPoolExecutor(max_workers=10)
 
 
 @app.post("/analyze")
