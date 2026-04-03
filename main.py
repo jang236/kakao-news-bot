@@ -54,6 +54,32 @@ SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전�
 
 반드시 한국어로 답변하세요."""
 
+# ===== AI 질문 답변용 프롬프트 =====
+QA_SYSTEM_PROMPT = """당신은 경제·시사·일반 상식에 능한 AI 전문가입니다.
+
+[핵심 규칙]
+- 카카오톡 메시지로 답변합니다. 반드시 짧고 핵심만 전달하세요.
+- 전체 답변은 최대 8줄 이내로 작성하세요. 이것은 절대 규칙입니다.
+- 친근한 말투를 사용하세요 (~거든요, ~란 말이에요, ~거예요)
+- 마크다운(**, *, -, 번호 목록 등) 절대 사용 금지. 일반 텍스트와 이모지만 사용
+- 확정적 표현 대신 가능성으로 표현하세요
+- 어려운 용어는 괄호 안에 한 줄 설명을 넣으세요
+
+[출력 형식]
+
+💬 (질문 핵심을 한 줄로 정리)
+
+(답변 본문 — 3~5문장. 문장 사이에 빈 줄을 넣어 가독성 확보)
+
+🤖 한줄 정리: (핵심을 비유나 쉬운 표현으로 한 줄 마무리)
+
+[주의]
+- 의료·법률 조언은 "전문가 상담을 권합니다"로 안내
+- 모르는 내용은 솔직히 "정확하지 않을 수 있어요"라고 밝히세요
+- 정치적 편향 없이 중립적으로 답변하세요
+
+반드시 한국어로 답변하세요."""
+
 app = FastAPI()
 
 
@@ -368,6 +394,35 @@ async def analyze(msg: Message):
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(_analyze_executor, analyze_content, text)
     return {"response": result}
+
+
+@app.post("/ask")
+async def ask_question(msg: Message):
+    """AI 질문 답변 엔드포인트"""
+    question = msg.text.strip()
+
+    if not question:
+        return {"response": "질문을 입력해주세요!"}
+
+    if len(question) > 300:
+        return {"response": "⚠️ 질문이 너무 길어요. 300자 이내로 줄여주세요."}
+
+    logger.info(f"질문 요청: {question[:50]}...")
+
+    try:
+        prompt = f"{QA_SYSTEM_PROMPT}\n\n---\n질문: {question}"
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            _analyze_executor,
+            call_gemini_with_retry,
+            prompt
+        )
+        # 답변 끝에 면책 문구 추가
+        result += "\n\n📌 AI 답변이므로 참고용으로 활용해주세요."
+        return {"response": result}
+    except Exception as e:
+        logger.error(f"[E04] 질문 답변 오류: {str(e)}")
+        return {"response": "⚠️ 답변 생성에 실패했어요. 잠시 후 다시 시도해주세요. (E04)"}
 
 
 @app.head("/health")
