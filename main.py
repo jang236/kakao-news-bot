@@ -6,7 +6,7 @@ import asyncio
 import json as json_module
 import logging
 from concurrent.futures import ThreadPoolExecutor
-import google.generativeai as genai
+from google import genai
 from fastapi import FastAPI
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -14,13 +14,13 @@ import requests
 from bs4 import BeautifulSoup
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# ===== Gemini API 설정 =====
-API_KEY = os.environ.get("GEMINI_API_KEY", "")
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-3-flash-preview")
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ===== Gemini API 설정 =====
+API_KEY = os.environ.get("GEMINI_API_KEY", "")
+_client = genai.Client(api_key=API_KEY) if API_KEY else None
+MODEL_NAME = "gemini-3-flash-preview"
 
 SYSTEM_PROMPT = """당신은 뉴스를 경제적 관점에서 해석하는 전문가입니다.
 
@@ -287,18 +287,21 @@ def extract_youtube(url: str) -> dict:
     return {"title": title, "body": transcript_text}
 
 
-def call_gemini_with_retry(prompt: str, max_retries: int = 1) -> str:
-    """Gemini API를 타임아웃 + 재시도로 호출합니다."""
+def call_gemini_with_retry(prompt: str, max_retries: int = 2) -> str:
+    """Gemini API를 재시도로 호출합니다."""
+    if not _client:
+        raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다")
+
     for attempt in range(max_retries):
         try:
             logger.info(f"Gemini API 호출 시도 {attempt + 1}/{max_retries}")
-            response = model.generate_content(
-                prompt,
-                request_options={"timeout": 45}
+            response = _client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,
             )
             return response.text
         except Exception as e:
-            logger.warning(f"Gemini API 시도 {attempt + 1} 실패: {str(e)}")
+            logger.warning(f"[E04] Gemini API 시도 {attempt + 1} 실패: {str(e)}")
             if attempt < max_retries - 1:
                 time.sleep(2)
                 continue
@@ -313,13 +316,13 @@ def analyze_content(url: str) -> str:
             content = extract_youtube(url)
             content_type = "유튜브 영상"
             if not content["body"]:
-                return "⚠️ 자막을 가져올 수 없는 영상이에요. 자막이 있는 영상을 넣어주세요!"
+                return "⚠️ 자막을 가져올 수 없는 영상이에요. 자막이 있는 영상을 넣어주세요! (E06)"
         else:
             content = extract_article(url)
             content_type = "뉴스 기사"
 
         if len(content["body"]) < 10 and not content["title"]:
-            return f"⚠️ {content_type} 내용을 가져올 수 없습니다. URL을 확인해주세요."
+            return f"⚠️ {content_type} 내용을 가져올 수 없습니다. URL을 확인해주세요. (E06)"
 
         # 본문이 짧으면 제목을 본문에 포함 (og:description 폴백 대응)
         analysis_body = content["body"]
@@ -331,12 +334,12 @@ def analyze_content(url: str) -> str:
         return result
 
     except requests.exceptions.Timeout:
-        return "⚠️ 뉴스 페이지 접속 시간이 초과되었습니다. 다시 시도해주세요."
+        return "⚠️ 뉴스 페이지 접속 시간이 초과되었습니다. 다시 시도해주세요. (E06)"
     except requests.exceptions.RequestException as e:
-        return f"⚠️ URL 접속 오류: {str(e)}"
+        return f"⚠️ URL 접속 오류가 발생했습니다. (E06)"
     except Exception as e:
-        logger.error(f"분석 오류: {str(e)}")
-        return "⚠️ AI 분석에 실패했어요. 잠시 후 다시 시도해주세요."
+        logger.error(f"[E04] 분석 오류: {str(e)}")
+        return "⚠️ AI 분석에 실패했어요. 잠시 후 다시 시도해주세요. (E04)"
 
 
 @app.head("/")

@@ -2,6 +2,6 @@ fastapi==0.115.0
 uvicorn==0.30.0
 requests==2.32.0
 beautifulsoup4==4.12.3
-google-generativeai==0.8.0
+google-genai>=1.56.0
 trafilatura
 youtube-transcript-api
