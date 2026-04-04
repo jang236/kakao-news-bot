@@ -311,12 +311,18 @@ def call_gemini_with_retry(prompt: str, max_retries: int = 2, config: dict = Non
             logger.info(f"Gemini API 호출 시도 {attempt + 1}/{max_retries}")
             gen_config = None
             if config:
-                gen_config = types.GenerateContentConfig(**config)
+                try:
+                    gen_config = types.GenerateContentConfig(**config)
+                    logger.info(f"Config 적용: {config}")
+                except Exception as ce:
+                    logger.warning(f"Config 생성 실패: {ce}, config 없이 호출")
             kwargs = {"model": MODEL_NAME, "contents": prompt}
             if gen_config:
                 kwargs["config"] = gen_config
             response = _client.models.generate_content(**kwargs)
-            return response.text
+            result_text = response.text
+            logger.info(f"Gemini 응답 길이: {len(result_text)} chars")
+            return result_text
         except Exception as e:
             logger.warning(f"[E04] Gemini API 시도 {attempt + 1} 실패: {str(e)}")
             if attempt < max_retries - 1:
