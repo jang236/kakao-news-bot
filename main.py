@@ -7,7 +7,7 @@ import json as json_module
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from google import genai
-from google.genai import types
+
 from fastapi import FastAPI
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -309,7 +309,7 @@ def extract_youtube(url: str) -> dict:
     return {"title": title, "body": transcript_text}
 
 
-def call_gemini_with_retry(prompt: str, max_retries: int = 2, config: dict = None) -> str:
+def call_gemini_with_retry(prompt: str, max_retries: int = 2) -> str:
     """Gemini API를 재시도로 호출합니다."""
     if not _client:
         raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다")
@@ -317,30 +317,11 @@ def call_gemini_with_retry(prompt: str, max_retries: int = 2, config: dict = Non
     for attempt in range(max_retries):
         try:
             logger.info(f"Gemini API 호출 시도 {attempt + 1}/{max_retries}")
-            gen_config = None
-            if config:
-                try:
-                    gen_config = types.GenerateContentConfig(**config)
-                    logger.info(f"Config 적용: {config}")
-                except Exception as ce:
-                    logger.warning(f"Config 생성 실패: {ce}, config 없이 호출")
-            kwargs = {"model": MODEL_NAME, "contents": prompt}
-            if gen_config:
-                kwargs["config"] = gen_config
-            response = _client.models.generate_content(**kwargs)
-            # 디버그: finish_reason 확인
-            try:
-                cand = response.candidates[0]
-                finish = cand.finish_reason if hasattr(cand, 'finish_reason') else 'unknown'
-                parts_count = len(cand.content.parts) if hasattr(cand, 'content') and hasattr(cand.content, 'parts') else 0
-                full_text = ''.join(p.text for p in cand.content.parts if hasattr(p, 'text'))
-                logger.info(f"Gemini finish_reason: {finish} | parts: {parts_count} | full_text_len: {len(full_text)} | response.text_len: {len(response.text)}")
-            except Exception as de:
-                logger.warning(f"디버그 로그 실패: {de}")
-                full_text = response.text
-            result_text = full_text if len(full_text) > len(response.text) else response.text
-            logger.info(f"Gemini 최종 응답 길이: {len(result_text)} chars")
-            return result_text
+            response = _client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,
+            )
+            return response.text
         except Exception as e:
             logger.warning(f"[E04] Gemini API 시도 {attempt + 1} 실패: {str(e)}")
             if attempt < max_retries - 1:
@@ -430,11 +411,11 @@ async def ask_question(msg: Message):
         now = datetime.now(kst)
         date_info = now.strftime("현재 날짜: %Y년 %m월 %d일 %A, 시간: %H:%M (한국시간)")
         prompt = f"{QA_SYSTEM_PROMPT}\n\n[현재 시간 정보]\n{date_info}\n\n---\n질문: {question}"
-        qa_config = {"max_output_tokens": 512, "temperature": 0.7}
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             _analyze_executor,
-            lambda: call_gemini_with_retry(prompt, config=qa_config)
+            call_gemini_with_retry,
+            prompt
         )
         return {"response": result}
     except Exception as e:
