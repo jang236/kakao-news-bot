@@ -413,7 +413,11 @@ async def ask_question(msg: Message):
     logger.info(f"질문 요청: {question[:50]}...")
 
     try:
-        prompt = f"{QA_SYSTEM_PROMPT}\n\n---\n질문: {question}"
+        from datetime import datetime, timezone, timedelta
+        kst = timezone(timedelta(hours=9))
+        now = datetime.now(kst)
+        date_info = now.strftime("현재 날짜: %Y년 %m월 %d일 %A, 시간: %H:%M (한국시간)")
+        prompt = f"{QA_SYSTEM_PROMPT}\n\n[현재 시간 정보]\n{date_info}\n\n---\n질문: {question}"
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             _analyze_executor,
