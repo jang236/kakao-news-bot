@@ -328,8 +328,18 @@ def call_gemini_with_retry(prompt: str, max_retries: int = 2, config: dict = Non
             if gen_config:
                 kwargs["config"] = gen_config
             response = _client.models.generate_content(**kwargs)
-            result_text = response.text
-            logger.info(f"Gemini 응답 길이: {len(result_text)} chars")
+            # 디버그: finish_reason 확인
+            try:
+                cand = response.candidates[0]
+                finish = cand.finish_reason if hasattr(cand, 'finish_reason') else 'unknown'
+                parts_count = len(cand.content.parts) if hasattr(cand, 'content') and hasattr(cand.content, 'parts') else 0
+                full_text = ''.join(p.text for p in cand.content.parts if hasattr(p, 'text'))
+                logger.info(f"Gemini finish_reason: {finish} | parts: {parts_count} | full_text_len: {len(full_text)} | response.text_len: {len(response.text)}")
+            except Exception as de:
+                logger.warning(f"디버그 로그 실패: {de}")
+                full_text = response.text
+            result_text = full_text if len(full_text) > len(response.text) else response.text
+            logger.info(f"Gemini 최종 응답 길이: {len(result_text)} chars")
             return result_text
         except Exception as e:
             logger.warning(f"[E04] Gemini API 시도 {attempt + 1} 실패: {str(e)}")
