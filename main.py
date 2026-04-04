@@ -299,7 +299,7 @@ def extract_youtube(url: str) -> dict:
     return {"title": title, "body": transcript_text}
 
 
-def call_gemini_with_retry(prompt: str, max_retries: int = 2) -> str:
+def call_gemini_with_retry(prompt: str, max_retries: int = 2, config: dict = None) -> str:
     """Gemini API를 재시도로 호출합니다."""
     if not _client:
         raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다")
@@ -307,10 +307,10 @@ def call_gemini_with_retry(prompt: str, max_retries: int = 2) -> str:
     for attempt in range(max_retries):
         try:
             logger.info(f"Gemini API 호출 시도 {attempt + 1}/{max_retries}")
-            response = _client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt,
-            )
+            kwargs = {"model": MODEL_NAME, "contents": prompt}
+            if config:
+                kwargs["config"] = config
+            response = _client.models.generate_content(**kwargs)
             return response.text
         except Exception as e:
             logger.warning(f"[E04] Gemini API 시도 {attempt + 1} 실패: {str(e)}")
@@ -401,11 +401,11 @@ async def ask_question(msg: Message):
         now = datetime.now(kst)
         date_info = now.strftime("현재 날짜: %Y년 %m월 %d일 %A, 시간: %H:%M (한국시간)")
         prompt = f"{QA_SYSTEM_PROMPT}\n\n[현재 시간 정보]\n{date_info}\n\n---\n질문: {question}"
+        qa_config = {"max_output_tokens": 256, "temperature": 0.7}
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             _analyze_executor,
-            call_gemini_with_retry,
-            prompt
+            lambda: call_gemini_with_retry(prompt, config=qa_config)
         )
         return {"response": result}
     except Exception as e:
