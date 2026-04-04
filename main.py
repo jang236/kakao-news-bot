@@ -402,7 +402,7 @@ async def ask_question(msg: Message):
         now = datetime.now(kst)
         date_info = now.strftime("현재 날짜: %Y년 %m월 %d일 %A, 시간: %H:%M (한국시간)")
         prompt = f"{QA_SYSTEM_PROMPT}\n\n[현재 시간 정보]\n{date_info}\n\n---\n질문: {question}"
-        qa_config = {"max_output_tokens": 256, "temperature": 0.7}
+        qa_config = {"max_output_tokens": 512, "temperature": 0.7}
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             _analyze_executor,
