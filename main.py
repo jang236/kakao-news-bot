@@ -7,6 +7,7 @@ import json as json_module
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from google import genai
+from google.genai import types
 from fastapi import FastAPI
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -308,9 +309,12 @@ def call_gemini_with_retry(prompt: str, max_retries: int = 2, config: dict = Non
     for attempt in range(max_retries):
         try:
             logger.info(f"Gemini API 호출 시도 {attempt + 1}/{max_retries}")
-            kwargs = {"model": MODEL_NAME, "contents": prompt}
+            gen_config = None
             if config:
-                kwargs["config"] = config
+                gen_config = types.GenerateContentConfig(**config)
+            kwargs = {"model": MODEL_NAME, "contents": prompt}
+            if gen_config:
+                kwargs["config"] = gen_config
             response = _client.models.generate_content(**kwargs)
             return response.text
         except Exception as e:
