@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 
 # ===== 네이버 검색 API =====
-NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "")
-NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
+# 기존 kakao-news-auto 패턴 유지 (Secrets 우선, 폴백은 기존 키)
+NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "EU6h_rE1b4pu48Bsrfdk")
+NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "nz0wgmUPUK")
 
 # ===== Gemini =====
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
