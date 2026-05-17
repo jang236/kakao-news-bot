@@ -15,6 +15,9 @@ import requests
 from bs4 import BeautifulSoup
 from youtube_transcript_api import YouTubeTranscriptApi
 
+# 키워드 검색 모듈 (kakao-news-auto에서 이전된 기능)
+from news_search import search_and_analyze
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,10 @@ app = FastAPI()
 
 class Message(BaseModel):
     text: str
+
+
+class SearchRequest(BaseModel):
+    keyword: str
 
 
 def extract_article(url: str) -> dict:
@@ -421,6 +428,21 @@ async def ask_question(msg: Message):
     except Exception as e:
         logger.error(f"[E04] 질문 답변 오류: {str(e)}")
         return {"response": "⚠️ 답변 생성에 실패했어요. 잠시 후 다시 시도해주세요. (E04)"}
+
+
+@app.post("/search-keyword")
+async def search_keyword(req: SearchRequest):
+    """
+    키워드 기반 뉴스 검색 (kakao-news-auto에서 이전된 기능)
+    - 네이버 검색 API → 3일 필터 → 본문 크롤링 → Gemini 통합 필터+분석
+    - 최대 3건의 카톡 포맷 메시지 반환
+    """
+    keyword = req.keyword.strip()
+    logger.info(f"키워드 검색 요청: {keyword}")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(_analyze_executor, search_and_analyze, keyword)
+    return result
 
 
 @app.head("/health")
