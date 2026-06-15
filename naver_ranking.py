@@ -234,7 +234,7 @@ def build_messages(headlines: list, summaries: list) -> list:
             blocks.append(
                 f"📰 {h['title']}\n\n"
                 f"✅ 요약 ({emoji}{label}):\n{s['summary']}\n\n"
-                f"🔗 링크:\n {h['url']}"
+                f"🔗 링크:\n{h['url']}"
             )
 
         body = "\n\n──────────\n\n".join(blocks)
