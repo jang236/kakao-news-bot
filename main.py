@@ -18,6 +18,9 @@ from youtube_transcript_api import YouTubeTranscriptApi
 # 키워드 검색 모듈 (kakao-news-auto에서 이전된 기능)
 from news_search import search_and_analyze
 
+# 네이버 경제 헤드라인 랭킹 모듈
+from naver_ranking import get_ranking
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,10 @@ class Message(BaseModel):
 
 class SearchRequest(BaseModel):
     keyword: str
+
+
+class RankingRequest(BaseModel):
+    count: int = 9
 
 
 def extract_article(url: str) -> dict:
@@ -442,6 +449,18 @@ async def search_keyword(req: SearchRequest):
 
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(_analyze_executor, search_and_analyze, keyword)
+    return result
+
+
+@app.post("/ranking")
+async def ranking(req: RankingRequest):
+    """
+    네이버 경제 헤드라인 랭킹 (section/101)
+    - 헤드라인 수집 → Gemini 1회 한 줄 요약+감성 → 3건씩 분할 메시지 반환
+    """
+    logger.info(f"네이버랭킹 요청: {req.count}건")
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(_analyze_executor, get_ranking, req.count)
     return result
 
 

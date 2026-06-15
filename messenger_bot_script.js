@@ -7,6 +7,7 @@
  * [기능 2] AI 질문 답변 — "질문 ○○○"
  * [기능 3] 키워드 뉴스 검색 — "검색 ○○○"
  * [기능 4] 유틸 — !봇상태, !테스트발송
+ * [기능 5] 네이버 경제 헤드라인 랭킹 — "네이버랭킹" (또는 "네이버랭킹 6"으로 건수 지정)
  *
  * v5 변경사항 (v4 → v5):
  * - 단일 서버 통합: NEWS_AUTO_URL 제거, SERVER_URL 하나만 사용
@@ -151,6 +152,44 @@ function searchKeywordAsync(room, keyword) {
     }).start();
 }
 
+// ===== [기능 5] 네이버 경제 헤드라인 랭킹 (백그라운드 스레드) =====
+
+function rankingAsync(room, count) {
+    new java.lang.Thread({
+        run: function () {
+            warmupServer();
+            for (var i = 0; i < 2; i++) {
+                try {
+                    var res = httpPostJson("/ranking", { count: count }, 90000);
+                    if (!res) {
+                        Api.replyRoom(room, "⚠️ 서버 응답 없음 (E01)");
+                        return;
+                    }
+                    var result = JSON.parse(res);
+                    if (result.status === "error") {
+                        Api.replyRoom(room, "⚠️ " + (result.message || "랭킹 조회 오류"));
+                        return;
+                    }
+                    if (result.messages && result.messages.length > 0) {
+                        for (var idx = 0; idx < result.messages.length; idx++) {
+                            java.lang.Thread.sleep(800);
+                            Api.replyRoom(room, result.messages[idx]);
+                        }
+                    } else {
+                        Api.replyRoom(room, result.message || "📭 오늘 경제 헤드라인을 불러오지 못했어요.");
+                    }
+                    markRequestDone();
+                    return;
+                } catch (e) {
+                    Log.d("[뉴스봇] 랭킹 시도 " + (i + 1) + " 실패: " + e.message);
+                    if (i === 0) java.lang.Thread.sleep(5000);
+                }
+            }
+            Api.replyRoom(room, "⚠️ 랭킹 조회 오류가 계속됩니다. 잠시 후 다시 시도해주세요. (E04)");
+        }
+    }).start();
+}
+
 // ===== response 핸들러 =====
 
 function response(room, msg, sender, isGroupChat, replier) {
@@ -175,6 +214,17 @@ function response(room, msg, sender, isGroupChat, replier) {
         }
         replier.reply("🤖 답변 준비 중... (5~10초 소요)");
         askAsync(room, question);
+        return;
+    }
+
+    // ── 네이버 경제 헤드라인 랭킹 ("네이버랭킹") ──
+    if (text.indexOf("네이버랭킹") === 0) {
+        var rest = text.substring(5).trim();
+        var count = parseInt(rest, 10);
+        if (isNaN(count) || count < 1) count = 9;
+        if (count > 15) count = 15;
+        replier.reply("📊 오늘의 경제 헤드라인 정리 중... (10~15초 소요)");
+        rankingAsync(room, count);
         return;
     }
 
