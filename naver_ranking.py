@@ -42,14 +42,18 @@ SECTION_MAP = {
 }
 DEFAULT_SID = "101"  # 경제
 
-# 원문자 넘버링 (①~⑮)
-CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
+# 한 메시지당 뉴스 건수 (2개씩 → 총 10건이면 5개 메시지)
+GROUP_SIZE = 2
 
-# 한 메시지당 뉴스 건수
-GROUP_SIZE = 3
+# 기본 발송 건수
+DEFAULT_COUNT = 10
 
-# 감성 이모지
-SENTIMENT_EMOJI = {"positive": "🟢", "negative": "🔴", "neutral": "🟡"}
+# 감성 (이모지, 한글 라벨)
+SENTIMENT_MAP = {
+    "positive": ("🟢", "긍정"),
+    "negative": ("🔴", "부정"),
+    "neutral": ("🟡", "중립"),
+}
 
 # 요일 한글
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
@@ -114,8 +118,8 @@ RANKING_PROMPT = """당신은 한국 주식 투자자를 위한 뉴스 큐레이
 
 [작업]
 - 모든 항목을 빠짐없이, 입력 순서(index) 그대로 처리하세요.
-- 각 뉴스마다 sentiment(positive/negative/neutral)와 한 줄 요약(summary)을 작성하세요.
-- summary는 정확히 한 문장. 친근한 말투(~거든요, ~이에요, ~예요)를 쓰세요.
+- 각 뉴스마다 sentiment(positive/negative/neutral)와 요약(summary)을 작성하세요.
+- summary는 1~2문장. 친근한 말투(~거든요, ~이에요, ~예요)를 쓰세요.
 - 원본 요약은 120자에서 잘려 있을 수 있으니, 제목과 합쳐 자연스럽고 완결된 문장으로 만드세요.
 - 구체적 수치(주가, %, 금액)가 있으면 살리세요.
 - 마크다운(**, *, - 등) 절대 금지. 일반 텍스트만.
@@ -199,8 +203,15 @@ def _fallback_summaries(headlines: list) -> list:
 
 def build_messages(headlines: list, summaries: list) -> list:
     """
-    헤드라인 + 요약을 3건씩 묶어 카톡 메시지 배열로 생성
-    각 건: ① 제목 / 🟢 요약 / 🔗 링크
+    헤드라인 + 요약을 2건씩 묶어 카톡 메시지 배열로 생성
+    각 건 포맷:
+        📰 제목
+
+        ✅ 요약 (🟢긍정):
+        요약 내용
+
+        🔗 링크:
+         URL
     """
     now = datetime.now(KST)
     date_str = f"{now.month}/{now.day}({WEEKDAY_KR[now.weekday()]})"
@@ -213,40 +224,37 @@ def build_messages(headlines: list, summaries: list) -> list:
         start = part * GROUP_SIZE
         chunk = headlines[start:start + GROUP_SIZE]
 
-        header = [
-            f"📊 오늘의 경제 헤드라인 ({part + 1}/{num_msgs})",
-            f"{date_str} · 네이버 경제",
-            "━━━━━━━━━━━━━━━",
-        ]
+        header = f"📊 오늘의 경제 헤드라인 ({part + 1}/{num_msgs}) · {date_str}"
+
         blocks = []
         for j, h in enumerate(chunk):
             idx = start + j
-            num = CIRCLED[idx] if idx < len(CIRCLED) else f"{idx + 1}."
             s = summaries[idx]
-            emoji = SENTIMENT_EMOJI.get(s.get("sentiment", "neutral"), "🟡")
+            emoji, label = SENTIMENT_MAP.get(s.get("sentiment", "neutral"), ("🟡", "중립"))
             blocks.append(
-                f"{num} {h['title']}\n"
-                f"{emoji} {s['summary']}\n"
-                f"🔗 {h['url']}"
+                f"📰 {h['title']}\n\n"
+                f"✅ 요약 ({emoji}{label}):\n{s['summary']}\n\n"
+                f"🔗 링크:\n {h['url']}"
             )
 
-        messages.append("\n".join(header) + "\n" + "\n\n".join(blocks))
+        body = "\n\n──────────\n\n".join(blocks)
+        messages.append(f"{header}\n━━━━━━━━━━━━━━━\n\n{body}")
 
     return messages
 
 
 # ===== 메인 엔트리포인트 =====
 
-def get_ranking(count: int = 9, category: str = "경제") -> dict:
+def get_ranking(count: int = DEFAULT_COUNT, category: str = "경제") -> dict:
     """
-    네이버 경제 헤드라인 수집 → Gemini 한 줄 요약 → 3건씩 분할 메시지
+    네이버 경제 헤드라인 수집 → Gemini 한 줄 요약 → 2건씩 분할 메시지
     Returns: {status, count, messages} 또는 {status, message}
     """
     try:
         count = int(count)
     except (TypeError, ValueError):
-        count = 9
-    count = max(1, min(count, 15))
+        count = DEFAULT_COUNT
+    count = max(1, min(count, 20))
 
     sid = SECTION_MAP.get((category or "경제").strip(), DEFAULT_SID)
 

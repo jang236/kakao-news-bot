@@ -221,8 +221,8 @@ function response(room, msg, sender, isGroupChat, replier) {
     if (text.indexOf("네이버랭킹") === 0) {
         var rest = text.substring(5).trim();
         var count = parseInt(rest, 10);
-        if (isNaN(count) || count < 1) count = 9;
-        if (count > 15) count = 15;
+        if (isNaN(count) || count < 1) count = 10;
+        if (count > 20) count = 20;
         replier.reply("📊 오늘의 경제 헤드라인 정리 중... (10~15초 소요)");
         rankingAsync(room, count);
         return;
